@@ -7,10 +7,11 @@ from supervisely.app.widgets import Button, Card, Container, Field, Input, Input
 from main import predict_supervisely_image_id, tag_supervisely_dataset
 
 
-image_id_input = InputNumber(min=1, step=1, value=1)
-dataset_id_input = InputNumber(min=1, step=1, value=1)
+FIXED_IMAGE_SIZE = 224
+
+image_id_input = Input(value="", placeholder="e.g. 12345")
+dataset_id_input = Input(value="", placeholder="e.g. 67890")
 top_k_input = InputNumber(min=1, max=9, step=1, value=3)
-img_size_input = InputNumber(min=32, max=1024, step=32, value=224)
 device_input = Input(value="auto", placeholder="auto | cpu | cuda | mps")
 tag_name_input = Input(value="car_view", placeholder="Image tag name")
 
@@ -29,7 +30,7 @@ controls = Card(
             Field(content=image_id_input, title="Image ID"),
             Field(content=dataset_id_input, title="Dataset ID"),
             Field(content=top_k_input, title="Top-k"),
-            Field(content=img_size_input, title="Image size"),
+            Field(content=Text(f"{FIXED_IMAGE_SIZE}", status="text"), title="Image size (fixed)"),
             Field(content=device_input, title="Device"),
             Field(content=tag_name_input, title="Tag name"),
             run_button,
@@ -56,11 +57,26 @@ def _format_top_k(top_items):
     return "\n".join(lines)
 
 
+def _parse_positive_int(value, field_name: str) -> int:
+    text = str(value).strip()
+    if text == "":
+        raise ValueError(f"{field_name} is required")
+    parsed = int(text)
+    if parsed < 1:
+        raise ValueError(f"{field_name} must be >= 1")
+    return parsed
+
+
 @run_button.click
 def run_inference() -> None:
-    image_id = int(image_id_input.get_value())
+    try:
+        image_id = _parse_positive_int(image_id_input.get_value(), "Image ID")
+    except Exception as exc:
+        status_text.set(f"Error: {exc}", status="error")
+        return
+
     top_k = int(top_k_input.get_value())
-    img_size = int(img_size_input.get_value())
+    img_size = FIXED_IMAGE_SIZE
     device = str(device_input.get_value()).strip() or "auto"
 
     status_text.set("Running inference...", status="text")
@@ -92,9 +108,14 @@ def run_inference() -> None:
 
 @tag_dataset_button.click
 def run_dataset_tagging() -> None:
-    dataset_id = int(dataset_id_input.get_value())
+    try:
+        dataset_id = _parse_positive_int(dataset_id_input.get_value(), "Dataset ID")
+    except Exception as exc:
+        status_text.set(f"Error: {exc}", status="error")
+        return
+
     top_k = int(top_k_input.get_value())
-    img_size = int(img_size_input.get_value())
+    img_size = FIXED_IMAGE_SIZE
     device = str(device_input.get_value()).strip() or "auto"
     tag_name = str(tag_name_input.get_value()).strip() or "car_view"
 
