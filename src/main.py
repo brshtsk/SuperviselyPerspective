@@ -9,7 +9,10 @@ from model_store import DEFAULT_MODEL_URL, ensure_model_downloaded
 
 
 def _load_infer_module():
-    module_path = Path(__file__).resolve().parents[2] / "model" / "infer_perspective.py"
+    module_path = Path(__file__).resolve().parent / "infer_perspective.py"
+    if not module_path.exists():
+        raise RuntimeError(f"Infer module file not found: {module_path}")
+
     spec = importlib.util.spec_from_file_location("infer_perspective", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Cannot load infer module from: {module_path}")
@@ -91,6 +94,84 @@ def predict_supervisely_image_id(
         "image_id": image_id,
         "image_name": image_info.name,
         **result,
+    }
+
+
+def tag_supervisely_dataset(
+    dataset_id: int,
+    tag_name: str = "car_view",
+    overwrite: bool = True,
+    model_url: str = DEFAULT_MODEL_URL,
+    device_arg: str = "auto",
+    img_size: int = 224,
+    top_k: int = 3,
+) -> Dict[str, Any]:
+    import supervisely as sly
+
+    infer = _load_infer_module()
+    class_names = list(getattr(infer, "CLASS_NAMES", []))
+    if len(class_names) == 0:
+        raise RuntimeError("CLASS_NAMES not found in infer_perspective.py")
+
+    api = sly.Api.from_env()
+    dataset_info = api.dataset.get_info_by_id(dataset_id)
+    if dataset_info is None:
+        raise ValueError(f"Dataset not found by id: {dataset_id}")
+
+    project_meta = sly.ProjectMeta.from_json(api.project.get_meta(dataset_info.project_id))
+    tag_meta = project_meta.get_tag_meta(tag_name)
+
+    if tag_meta is None:
+        tag_meta = sly.TagMeta(
+            name=tag_name,
+            value_type=sly.TagValueType.ONEOF_STRING,
+            possible_values=class_names,
+        )
+        project_meta = project_meta.add_tag_meta(tag_meta)
+        api.project.update_meta(dataset_info.project_id, project_meta.to_json())
+
+    images = api.image.get_list(dataset_id)
+    predictor = build_predictor(
+        model_url=model_url,
+        device_arg=device_arg,
+        img_size=img_size,
+        top_k=top_k,
+    )
+
+    total = len(images)
+    success = 0
+    failed = 0
+
+    with tempfile.TemporaryDirectory(prefix="sly_car_view_batch_") as tmp_dir:
+        for image_info in images:
+            try:
+                local_path = os.path.join(tmp_dir, f"{image_info.id}_{image_info.name}")
+                api.image.download_path(image_info.id, local_path)
+
+                result = predictor(local_path)
+                predicted_class = result["predicted_class"]
+
+                ann_json = api.annotation.download_json(image_info.id)
+                ann = sly.Annotation.from_json(ann_json, project_meta)
+
+                tags = list(ann.img_tags)
+                if overwrite:
+                    tags = [tag for tag in tags if tag.meta.name != tag_name]
+
+                tags.append(sly.Tag(meta=tag_meta, value=predicted_class))
+                new_ann = ann.clone(img_tags=sly.TagCollection(tags))
+                api.annotation.upload_ann(image_info.id, new_ann)
+                success += 1
+            except Exception:
+                sly.logger.exception(f"Failed to tag image id={image_info.id}")
+                failed += 1
+
+    return {
+        "dataset_id": dataset_id,
+        "tag_name": tag_name,
+        "total": total,
+        "success": success,
+        "failed": failed,
     }
 
 
