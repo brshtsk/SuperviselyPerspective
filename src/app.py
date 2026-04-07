@@ -1,4 +1,7 @@
+import os
+
 import supervisely as sly
+import uvicorn
 from supervisely.app.widgets import Button, Card, Container, Field, Input, InputNumber, Text
 
 from main import predict_supervisely_image_id, tag_supervisely_dataset
@@ -123,3 +126,6 @@ def run_dataset_tagging() -> None:
 
 if __name__ == "__main__":
     sly.logger.info("Starting Supervisely app: Car View Classifier")
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run(app.get_server(), host=host, port=port, log_level="info")
