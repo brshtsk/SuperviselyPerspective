@@ -1,8 +1,14 @@
 import os
+from typing import Any
 
 import supervisely as sly
 import uvicorn
 from supervisely.app.widgets import Button, Card, Container, Field, Input, InputNumber, Text
+
+try:
+    from supervisely.app.widgets import Progress
+except Exception:
+    Progress = None
 
 from main import predict_supervisely_image_id, tag_supervisely_dataset
 
@@ -22,6 +28,20 @@ status_text = Text("", status="text")
 predicted_class_text = Text("", status="info")
 confidence_text = Text("", status="info")
 top_k_text = Text("", status="text")
+dataset_progress_text = Text("", status="text")
+dataset_eta_text = Text("", status="text")
+dataset_progress = Progress() if Progress is not None else None
+
+result_widgets: list[Any] = [
+    status_text,
+    predicted_class_text,
+    confidence_text,
+    top_k_text,
+    dataset_progress_text,
+    dataset_eta_text,
+]
+if dataset_progress is not None:
+    result_widgets.append(dataset_progress)
 
 controls = Card(
     title="Car view classification",
@@ -41,7 +61,7 @@ controls = Card(
 
 results = Card(
     title="Result",
-    content=Container([status_text, predicted_class_text, confidence_text, top_k_text]),
+    content=Container(result_widgets),
 )
 
 layout = Container([controls, results])
@@ -67,6 +87,35 @@ def _parse_positive_int(value, field_name: str) -> int:
     return parsed
 
 
+def _format_duration(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, sec = divmod(rem, 60)
+    if hours > 0:
+        return f"{hours}h {minutes}m {sec}s"
+    if minutes > 0:
+        return f"{minutes}m {sec}s"
+    return f"{sec}s"
+
+
+def _set_progress(current: int, total: int) -> None:
+    if dataset_progress is None:
+        return
+
+    try:
+        if hasattr(dataset_progress, "set_total"):
+            dataset_progress.set_total(total)
+
+        if hasattr(dataset_progress, "set_current_value"):
+            dataset_progress.set_current_value(current)
+        elif hasattr(dataset_progress, "set_current"):
+            dataset_progress.set_current(current)
+        elif hasattr(dataset_progress, "update"):
+            dataset_progress.update(current)
+    except Exception:
+        sly.logger.debug("Progress widget update skipped due to widget API mismatch")
+
+
 @run_button.click
 def run_inference() -> None:
     try:
@@ -83,6 +132,9 @@ def run_inference() -> None:
     predicted_class_text.set("", status="info")
     confidence_text.set("", status="info")
     top_k_text.set("", status="text")
+    dataset_progress_text.set("", status="text")
+    dataset_eta_text.set("", status="text")
+    _set_progress(0, 1)
 
     try:
         result = predict_supervisely_image_id(
@@ -123,6 +175,23 @@ def run_dataset_tagging() -> None:
     predicted_class_text.set("", status="info")
     confidence_text.set("", status="info")
     top_k_text.set("", status="text")
+    dataset_progress_text.set("Preparing...", status="text")
+    dataset_eta_text.set("", status="text")
+    _set_progress(0, 1)
+
+    def _on_progress(progress_data):
+        processed = int(progress_data.get("processed", 0))
+        total = int(progress_data.get("total", 0))
+        success = int(progress_data.get("success", 0))
+        failed = int(progress_data.get("failed", 0))
+        eta = float(progress_data.get("eta_seconds", 0.0))
+        avg = float(progress_data.get("avg_seconds_per_image", 0.0))
+
+        _set_progress(processed, max(total, 1))
+        dataset_progress_text.set(
+            f"Progress: {processed}/{total} | success: {success} | failed: {failed}", status="text"
+        )
+        dataset_eta_text.set(f"ETA: {_format_duration(eta)} | avg: {avg:.2f} s/img", status="text")
 
     try:
         stats = tag_supervisely_dataset(
@@ -132,6 +201,7 @@ def run_dataset_tagging() -> None:
             top_k=top_k,
             img_size=img_size,
             device_arg=device,
+            progress_cb=_on_progress,
         )
     except Exception as exc:
         sly.logger.exception("Dataset tagging failed")
@@ -143,6 +213,11 @@ def run_dataset_tagging() -> None:
         f"Total: {stats['total']}, success: {stats['success']}, failed: {stats['failed']}",
         status="info",
     )
+    dataset_eta_text.set(
+        f"Done in {_format_duration(float(stats.get('elapsed_seconds', 0.0)))} | avg: {float(stats.get('avg_seconds_per_image', 0.0)):.2f} s/img",
+        status="text",
+    )
+    _set_progress(int(stats.get("total", 0)), max(int(stats.get("total", 0)), 1))
 
 
 if __name__ == "__main__":

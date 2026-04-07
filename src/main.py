@@ -2,8 +2,9 @@ import argparse
 import importlib.util
 import os
 import tempfile
+import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from model_store import DEFAULT_MODEL_URL, ensure_model_downloaded
 
@@ -105,6 +106,7 @@ def tag_supervisely_dataset(
     device_arg: str = "auto",
     img_size: int = 224,
     top_k: int = 3,
+    progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     import supervisely as sly
 
@@ -141,9 +143,27 @@ def tag_supervisely_dataset(
     total = len(images)
     success = 0
     failed = 0
+    error_samples = []
+    started_at = time.monotonic()
+
+    sly.logger.info(
+        f"Start dataset tagging: dataset_id={dataset_id}, total={total}, device={device_arg}, img_size={img_size}, top_k={top_k}"
+    )
+
+    if progress_cb is not None:
+        progress_cb(
+            {
+                "processed": 0,
+                "total": total,
+                "success": 0,
+                "failed": 0,
+                "eta_seconds": 0.0,
+                "avg_seconds_per_image": 0.0,
+            }
+        )
 
     with tempfile.TemporaryDirectory(prefix="sly_car_view_batch_") as tmp_dir:
-        for image_info in images:
+        for idx, image_info in enumerate(images, start=1):
             try:
                 local_path = os.path.join(tmp_dir, f"{image_info.id}_{image_info.name}")
                 api.image.download_path(image_info.id, local_path)
@@ -162,9 +182,43 @@ def tag_supervisely_dataset(
                 new_ann = ann.clone(img_tags=sly.TagCollection(tags))
                 api.annotation.upload_ann(image_info.id, new_ann)
                 success += 1
-            except Exception:
+            except Exception as exc:
                 sly.logger.exception(f"Failed to tag image id={image_info.id}")
                 failed += 1
+                if len(error_samples) < 10:
+                    error_samples.append({"image_id": image_info.id, "error": str(exc)})
+
+            processed = success + failed
+            elapsed = time.monotonic() - started_at
+            avg_per_image = elapsed / processed if processed > 0 else 0.0
+            eta_seconds = avg_per_image * max(0, total - processed)
+
+            if idx == total or idx % 25 == 0:
+                sly.logger.info(
+                    f"Tagging progress: {processed}/{total}, success={success}, failed={failed}, avg={avg_per_image:.2f}s/img, eta={eta_seconds:.1f}s"
+                )
+
+            if progress_cb is not None:
+                try:
+                    progress_cb(
+                        {
+                            "processed": processed,
+                            "total": total,
+                            "success": success,
+                            "failed": failed,
+                            "eta_seconds": eta_seconds,
+                            "avg_seconds_per_image": avg_per_image,
+                        }
+                    )
+                except Exception:
+                    sly.logger.exception("Progress callback failed")
+
+    elapsed_total = time.monotonic() - started_at
+    avg_total = elapsed_total / total if total > 0 else 0.0
+
+    sly.logger.info(
+        f"Finished dataset tagging: dataset_id={dataset_id}, total={total}, success={success}, failed={failed}, elapsed={elapsed_total:.1f}s, avg={avg_total:.2f}s/img"
+    )
 
     return {
         "dataset_id": dataset_id,
@@ -172,6 +226,9 @@ def tag_supervisely_dataset(
         "total": total,
         "success": success,
         "failed": failed,
+        "elapsed_seconds": elapsed_total,
+        "avg_seconds_per_image": avg_total,
+        "error_samples": error_samples,
     }
 
 
