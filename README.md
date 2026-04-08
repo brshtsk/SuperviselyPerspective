@@ -1,6 +1,6 @@
 # Supervisely app: car perspective classification
 
-![logo-ml.png](img/logo-ml.png)
+![logo-ml.png](https://raw.githubusercontent.com/brshtsk/SuperviselyPerspective/main/img/logo-ml.png)
 
 Папка содержит полноценный каркас Supervisely app и CLI-скрипт для отладки.
 

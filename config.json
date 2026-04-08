@@ -1,7 +1,7 @@
 {
   "name": "Car View Classifier",
   "type": "app",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Predicts car perspective class by image id using a ResNet18 checkpoint from Hugging Face.",
   "categories": [
     "images",
@@ -10,7 +10,7 @@
   ],
   "entrypoint": "python src/app.py",
   "task_location": "application_sessions",
-  "icon": "img/logo-ml.png",
+  "icon": "https://raw.githubusercontent.com/brshtsk/SuperviselyPerspective/main/img/logo-ml.png",
   "icon_cover": true,
   "headless": false,
   "docker_image": "supervisely/base-py-sdk:6.73.424"
