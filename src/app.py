@@ -5,11 +5,6 @@ import supervisely as sly
 import uvicorn
 from supervisely.app.widgets import Button, Card, Container, Field, Input, InputNumber, Text
 
-try:
-    from supervisely.app.widgets import Progress
-except Exception:
-    Progress = None
-
 from main import predict_supervisely_image_id, tag_supervisely_dataset
 
 
@@ -30,7 +25,8 @@ confidence_text = Text("", status="info")
 top_k_text = Text("", status="text")
 dataset_progress_text = Text("", status="text")
 dataset_eta_text = Text("", status="text")
-dataset_progress = Progress() if Progress is not None else None
+# Keep UI backward-compatible: do not mount Progress widget on older platform frontends.
+dataset_progress = None
 
 result_widgets: List[Any] = [
     status_text,
