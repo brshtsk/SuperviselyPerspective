@@ -1,5 +1,5 @@
 import os
-from typing import Any
+from typing import Any, List
 
 import supervisely as sly
 import uvicorn
@@ -32,7 +32,7 @@ dataset_progress_text = Text("", status="text")
 dataset_eta_text = Text("", status="text")
 dataset_progress = Progress() if Progress is not None else None
 
-result_widgets: list[Any] = [
+result_widgets: List[Any] = [
     status_text,
     predicted_class_text,
     confidence_text,
