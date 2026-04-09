@@ -1,10 +1,14 @@
 import os
-import time
 from typing import Any, List
 
 import supervisely as sly
 import uvicorn
 from supervisely.app.widgets import Button, Card, Container, Field, Input, InputNumber, Text
+
+try:
+    from supervisely.app.widgets import Progress
+except Exception:
+    Progress = None
 
 from main import predict_supervisely_image_id, tag_supervisely_dataset
 
@@ -25,9 +29,7 @@ predicted_class_text = Text("", status="info")
 confidence_text = Text("", status="info")
 top_k_text = Text("", status="text")
 dataset_progress_text = Text("", status="text")
-dataset_eta_text = Text("", status="text")
-# Keep UI backward-compatible: do not mount Progress widget on older platform frontends.
-dataset_progress = None
+dataset_progress = Progress() if Progress is not None else None
 
 result_widgets: List[Any] = [
     status_text,
@@ -35,7 +37,6 @@ result_widgets: List[Any] = [
     confidence_text,
     top_k_text,
     dataset_progress_text,
-    dataset_eta_text,
 ]
 if dataset_progress is not None:
     result_widgets.append(dataset_progress)
@@ -84,17 +85,6 @@ def _parse_positive_int(value, field_name: str) -> int:
     return parsed
 
 
-def _format_duration(seconds: float) -> str:
-    total = max(0, int(seconds))
-    hours, rem = divmod(total, 3600)
-    minutes, sec = divmod(rem, 60)
-    if hours > 0:
-        return f"{hours}h {minutes}m {sec}s"
-    if minutes > 0:
-        return f"{minutes}m {sec}s"
-    return f"{sec}s"
-
-
 def _set_progress(current: int, total: int) -> None:
     if dataset_progress is None:
         return
@@ -130,8 +120,6 @@ def run_inference() -> None:
     confidence_text.set("", status="info")
     top_k_text.set("", status="text")
     dataset_progress_text.set("", status="text")
-    dataset_eta_text.set("", status="text")
-    _set_progress(0, 1)
 
     try:
         result = predict_supervisely_image_id(
@@ -173,22 +161,18 @@ def run_dataset_tagging() -> None:
     confidence_text.set("", status="info")
     top_k_text.set("", status="text")
     dataset_progress_text.set("Preparing...", status="text")
-    dataset_eta_text.set("", status="text")
     _set_progress(0, 1)
 
     def _on_progress(progress_data):
         processed = int(progress_data.get("processed", 0))
-        total = int(progress_data.get("total", 0))
+        total = max(1, int(progress_data.get("total", 0)))
         success = int(progress_data.get("success", 0))
         failed = int(progress_data.get("failed", 0))
-        eta = float(progress_data.get("eta_seconds", 0.0))
-        avg = float(progress_data.get("avg_seconds_per_image", 0.0))
 
-        _set_progress(processed, max(total, 1))
+        _set_progress(processed, total)
         dataset_progress_text.set(
             f"Progress: {processed}/{total} | success: {success} | failed: {failed}", status="text"
         )
-        dataset_eta_text.set(f"ETA: {_format_duration(eta)} | avg: {avg:.2f} s/img", status="text")
 
     try:
         stats = tag_supervisely_dataset(
@@ -210,74 +194,12 @@ def run_dataset_tagging() -> None:
         f"Total: {stats['total']}, success: {stats['success']}, failed: {stats['failed']}",
         status="info",
     )
-    dataset_eta_text.set(
-        f"Done in {_format_duration(float(stats.get('elapsed_seconds', 0.0)))} | avg: {float(stats.get('avg_seconds_per_image', 0.0)):.2f} s/img",
-        status="text",
-    )
-    _set_progress(int(stats.get("total", 0)), max(int(stats.get("total", 0)), 1))
+    total = max(1, int(stats.get("total", 0)))
+    _set_progress(total, total)
 
-
-def _install_http_diagnostics() -> None:
-    server = app.get_server()
-    if getattr(server.state, "http_diag_installed", False):
-        return
-
-    @server.middleware("http")
-    async def _log_http_requests(request, call_next):
-        started_at = time.perf_counter()
-        path = request.url.path
-        query = request.url.query
-        request_id = request.headers.get("x-request-id", "-")
-        try:
-            response = await call_next(request)
-            elapsed_ms = (time.perf_counter() - started_at) * 1000.0
-            sly.logger.info(
-                "HTTP request",
-                extra={
-                    "method": request.method,
-                    "path": path,
-                    "query": query,
-                    "status": response.status_code,
-                    "elapsed_ms": round(elapsed_ms, 2),
-                    "request_id": request_id,
-                },
-            )
-            return response
-        except Exception:
-            elapsed_ms = (time.perf_counter() - started_at) * 1000.0
-            sly.logger.exception(
-                f"HTTP request failed: {request.method} {path}?{query} request_id={request_id} elapsed_ms={elapsed_ms:.2f}"
-            )
-            raise
-
-    route_paths = []
-    for route in getattr(server, "routes", []):
-        route_path = getattr(route, "path", None)
-        if route_path is not None:
-            route_paths.append(route_path)
-
-    sly.logger.info(
-        "HTTP diagnostics enabled",
-        extra={"routes_count": len(route_paths), "routes_sample": route_paths[:25]},
-    )
-    server.state.http_diag_installed = True
-
-
-_install_http_diagnostics()
 
 if __name__ == "__main__":
     sly.logger.info("Starting Supervisely app: Car View Classifier")
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
-    sly.logger.info(
-        "App runtime environment",
-        extra={
-            "host": host,
-            "port": port,
-            "server_address": os.getenv("SERVER_ADDRESS", ""),
-            "api_server_address": os.getenv("API_SERVER_ADDRESS", ""),
-            "context_team_id": os.getenv("context.teamId", ""),
-            "context_workspace_id": os.getenv("context.workspaceId", ""),
-        },
-    )
     uvicorn.run(app.get_server(), host=host, port=port, log_level="info")

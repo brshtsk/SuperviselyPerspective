@@ -1,7 +1,7 @@
 {
   "name": "Car View Classifier",
   "type": "app",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "description": "Predicts car perspective class by image id using a ResNet18 checkpoint from Hugging Face.",
   "categories": [
     "images",
