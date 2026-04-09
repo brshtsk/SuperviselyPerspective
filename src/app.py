@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Any, List
 
 import supervisely as sly
@@ -216,8 +217,67 @@ def run_dataset_tagging() -> None:
     _set_progress(int(stats.get("total", 0)), max(int(stats.get("total", 0)), 1))
 
 
+def _install_http_diagnostics() -> None:
+    server = app.get_server()
+    if getattr(server.state, "http_diag_installed", False):
+        return
+
+    @server.middleware("http")
+    async def _log_http_requests(request, call_next):
+        started_at = time.perf_counter()
+        path = request.url.path
+        query = request.url.query
+        request_id = request.headers.get("x-request-id", "-")
+        try:
+            response = await call_next(request)
+            elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+            sly.logger.info(
+                "HTTP request",
+                extra={
+                    "method": request.method,
+                    "path": path,
+                    "query": query,
+                    "status": response.status_code,
+                    "elapsed_ms": round(elapsed_ms, 2),
+                    "request_id": request_id,
+                },
+            )
+            return response
+        except Exception:
+            elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+            sly.logger.exception(
+                f"HTTP request failed: {request.method} {path}?{query} request_id={request_id} elapsed_ms={elapsed_ms:.2f}"
+            )
+            raise
+
+    route_paths = []
+    for route in getattr(server, "routes", []):
+        route_path = getattr(route, "path", None)
+        if route_path is not None:
+            route_paths.append(route_path)
+
+    sly.logger.info(
+        "HTTP diagnostics enabled",
+        extra={"routes_count": len(route_paths), "routes_sample": route_paths[:25]},
+    )
+    server.state.http_diag_installed = True
+
+
+_install_http_diagnostics()
+
 if __name__ == "__main__":
     sly.logger.info("Starting Supervisely app: Car View Classifier")
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
+    sly.logger.info(
+        "App runtime environment",
+        extra={
+            "host": host,
+            "port": port,
+            "server_address": os.getenv("SERVER_ADDRESS", ""),
+            "api_server_address": os.getenv("API_SERVER_ADDRESS", ""),
+            "context_team_id": os.getenv("context.teamId", ""),
+            "context_workspace_id": os.getenv("context.workspaceId", ""),
+        },
+    )
     uvicorn.run(app.get_server(), host=host, port=port, log_level="info")
