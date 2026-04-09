@@ -22,3 +22,12 @@
 
 `Tag dataset` создаёт image tag (если его нет в meta проекта) и записывает в него `predicted_class` для каждого изображения датасета.
 
+## Демо-скриншоты
+
+### Массовая разметка датасета
+
+![dataset-tag.png](https://raw.githubusercontent.com/brshtsk/SuperviselyPerspective/main/img/dataset-tag.png)
+
+### Инференс изображения
+
+![image-infer.png](https://raw.githubusercontent.com/brshtsk/SuperviselyPerspective/main/img/image-infer.png)
