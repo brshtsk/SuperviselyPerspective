@@ -1,5 +1,8 @@
 # Supervisely app: car perspective classification
 
+[![Project](https://img.shields.io/badge/Project-AutoInspect-black?logo=github)](https://github.com/DedovInside/AutoInspect/tree/ml/ml)
+[![Hugging Face](https://img.shields.io/badge/Hugging%20Face-car--view-yellow?logo=huggingface)](https://huggingface.co/mitbersh/car-view)
+
 ![logo-ml.png](https://raw.githubusercontent.com/brshtsk/SuperviselyPerspective/main/img/logo-ml.png)
 
 Папка содержит полноценный каркас Supervisely app и CLI-скрипт для отладки.
